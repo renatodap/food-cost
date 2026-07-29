@@ -103,11 +103,19 @@ const NON_FOOD = new Set(["non-food", "household", "service"]);
 /**
  * Is this line stockable as pantry inventory?
  *
- * Excludes non-food, and excludes the lines that are money-about-food rather
- * than food: tax, tips, fees, deposits. Those are real spend and stay attached
- * to the transaction — they simply cannot be drawn from in grams.
+ * Requires at least one POSITIVE food tag, rather than merely the absence of a
+ * non-food one. dap-finance tags every receipt line, so an untagged line is one
+ * the tagger didn't recognize as food — and letting those through is how
+ * "Floral", "Paint" and "Great Value 33G Flex Trash Bags" became pantry lots
+ * that the matcher then cheerfully resolved to flour tortillas, caramel ice
+ * cream and frozen mango.
+ *
+ * Also excludes the lines that are money-about-food rather than food: tax, tips,
+ * fees, deposits. Those are real spend and stay attached to the transaction;
+ * they simply cannot be eaten.
  */
 export function isStockable(name: string, rawName: string | null, foodTags: string[]): boolean {
+  if (foodTags.length === 0) return false;
   if (foodTags.some((t) => NON_FOOD.has(t))) return false;
   const t = `${name} ${rawName ?? ""}`.toLowerCase();
   return !/\b(tax|tip|gratuity|service charge|delivery fee|bag fee|deposit|rounding|subtotal|total|change|discount|coupon)\b/.test(

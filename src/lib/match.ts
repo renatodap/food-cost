@@ -29,18 +29,19 @@ export const PROPOSE_FLOOR = 0.45;
 /**
  * How similar a receipt line must be to a food before it is resolved to it.
  *
- * The candidate set is only foods that have actually been eaten, which is a
- * strong prior — "Kroger Carrots" is being matched against a few hundred foods
- * he eats, not 406k. That makes a lower bar safe than it would be against the
- * full library, and the difference matters: at 0.5 most store-brand lines
- * ("Smithfield Pork Loin" vs "Pork loin, raw") never resolve, and a lot that
- * resolves to nothing can never be drawn from.
+ * Calibrated against the real basket rather than guessed. At 0.4 the matcher
+ * produced "Eggland Organic Eggs" → Organic Mixed Berries (0.44) and "Floral" →
+ * Flour tortilla (0.43); at 0.55 those fall away while "Celsius Drink" →
+ * Celsius Sparkling (0.57) and "Dole Smash Burger Kit" → Smash Burger (0.59)
+ * survive. A wrong resolution is worse than none, because it silently
+ * mis-costs every meal that then draws from the lot.
  *
- * A wrong resolution is still worse than none, so this stays above the trigram
- * default of 0.3 and every resulting link goes to the review queue rather than
- * being auto-confirmed.
+ * NOTE: this value is also pushed into pg_trgm.word_similarity_threshold for
+ * the resolving query. The `%>` operator reads that GUC, not this constant, so
+ * without the SET the operator's default of 0.6 silently governs and this
+ * number does nothing.
  */
-export const LOT_RESOLVE_MIN = 0.4;
+export const LOT_RESOLVE_MIN = 0.55;
 
 /** Beyond this, "I bought it then, I ate it now" stops being credible. */
 export const MAX_PANTRY_AGE_DAYS = 90;
@@ -93,8 +94,13 @@ export async function resolveLotFoods(): Promise<number> {
              f.id AS food_id,
              word_similarity(u.norm, normalize_food_text(f.name)) AS score
       FROM unresolved u
+      -- An explicit comparison, NOT the %> operator. That operator reads
+      -- pg_trgm.word_similarity_threshold (default 0.6), which would silently
+      -- override LOT_RESOLVE_MIN and filter candidates before the score check
+      -- below ever ran. mirror_food_item only holds foods actually eaten — a
+      -- few hundred rows — so giving up the trigram index costs nothing here.
       JOIN mirror_food_item f
-        ON normalize_food_text(f.name) %> u.norm
+        ON word_similarity(u.norm, normalize_food_text(f.name)) >= ${LOT_RESOLVE_MIN}
       WHERE NOT EXISTS (SELECT 1 FROM by_alias b WHERE b.id = u.id)
         -- Never resolve to something a human has explicitly rejected.
         AND NOT EXISTS (
