@@ -386,17 +386,165 @@ export async function proposePantryDraws(sinceDays = 60): Promise<{ proposed: nu
 }
 
 /* ========================================================================== */
+/* 4. Unit-basis lots: pro-rata allocation over a consumption window          */
+/* ========================================================================== */
+
+interface UnitLot {
+  id: number;
+  food_id: number;
+  label: string;
+  purchased_on: string;
+  remaining_cost: string;
+  currency: string;
+  window_end: string;
+}
+
+/**
+ * Cost the lots that FIFO-by-mass cannot touch.
+ *
+ * Supermarket receipts mostly print a UPC, not a weight — "QKR OATMEAL
+ * 030000010400 F, $5.24". There is no gram figure to deplete, so a mass-based
+ * draw finds nothing, and on real data that was 46 of 51 lots: the grocery half
+ * of the system attributed exactly nothing.
+ *
+ * The honest alternative is not to invent a package weight. It is to change the
+ * question. One tub of oatmeal bought on the 3rd, oatmeal eaten on the 4th, 6th
+ * and 9th, another tub bought on the 11th — that tub covered those three meals,
+ * and its cost divides across them in proportion to how much was eaten each
+ * time. The unknown is the package size; the *window* is observable.
+ *
+ * So the window runs from purchase to the next purchase of the same food (or
+ * MAX_PANTRY_AGE_DAYS, or today, whichever comes first), and the lot's cost is
+ * split pro-rata by grams across the meal entries inside it.
+ *
+ * This is a different claim from a FIFO draw and is labelled as such in
+ * `evidence.rule`, so a number produced this way can always be told apart from
+ * one measured against a printed weight.
+ */
+export async function proposeUnitLotAllocation(sinceDays = 60): Promise<{ proposed: number; skipped: number }> {
+  const lots = await sql<UnitLot[]>`
+    SELECT b.id,
+           l.food_id,
+           b.label,
+           b.purchased_on::text AS purchased_on,
+           b.remaining_cost,
+           b.currency,
+           -- The window closes when the same food is bought again: the next tub
+           -- takes over from there.
+           LEAST(
+             COALESCE(
+               (SELECT MIN(n.purchased_on)
+                  FROM pantry_lot n
+                 WHERE n.food_id = l.food_id
+                   AND n.purchased_on > l.purchased_on),
+               CURRENT_DATE + 1
+             ),
+             l.purchased_on + ${MAX_PANTRY_AGE_DAYS}::int,
+             CURRENT_DATE + 1
+           )::text AS window_end
+    FROM v_pantry_lot_balance b
+    JOIN pantry_lot l ON l.id = b.id
+    WHERE b.basis = 'unit'
+      AND b.is_open
+      AND l.food_id IS NOT NULL
+      AND b.remaining_cost > 0.005
+      AND l.purchased_on >= CURRENT_DATE - ${sinceDays}::int
+    ORDER BY l.purchased_on
+  `;
+
+  let proposed = 0;
+  let skipped = 0;
+
+  for (const lot of lots) {
+    const entries = await sql<{ entry_id: number; meal_id: number; quantity_g: string; meal_date: string }[]>`
+      SELECT e.id AS entry_id, e.meal_id, e.quantity_g, m.meal_date::text AS meal_date
+      FROM mirror_meal_entry e
+      JOIN mirror_meal m ON m.id = e.meal_id
+      WHERE e.food_id = ${lot.food_id}
+        AND e.quantity_g > 0
+        AND m.meal_date >= ${lot.purchased_on}::date
+        AND m.meal_date <  ${lot.window_end}::date
+        AND NOT EXISTS (
+          SELECT 1 FROM cost_link cl
+          WHERE cl.meal_entry_id = e.id AND cl.status IN ('confirmed', 'proposed')
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM cost_link cl
+          WHERE cl.meal_id = e.meal_id AND cl.method = 'direct_transaction'
+            AND cl.status IN ('confirmed', 'proposed')
+        )
+      ORDER BY m.meal_date
+    `;
+
+    // No meals in the window means the food is still in the pantry, not that
+    // something failed. Leaving it unattributed is the correct answer.
+    if (entries.length === 0) {
+      skipped++;
+      continue;
+    }
+
+    const totalG = entries.reduce((s, e) => s + Number(e.quantity_g), 0);
+    if (totalG <= 0) {
+      skipped++;
+      continue;
+    }
+
+    const remaining = Number(lot.remaining_cost);
+
+    // A window that closed because the food was re-bought is real evidence the
+    // lot was finished. One left open by the age cap is a weaker inference, so
+    // it scores lower.
+    const closedByRepurchase =
+      Date.parse(`${lot.window_end}T00:00:00Z`) <
+      Date.parse(`${lot.purchased_on}T00:00:00Z`) + MAX_PANTRY_AGE_DAYS * 86_400_000;
+    const confidence = closedByRepurchase ? 0.72 : 0.55;
+
+    for (const e of entries) {
+      const share = Number(e.quantity_g) / totalG;
+      const amount = remaining * share;
+      if (amount < 0.005) continue; // below a cent — not worth a row
+
+      await sql`
+        INSERT INTO cost_link
+          (meal_id, meal_entry_id, method, pantry_lot_id, allocated_amount, allocated_g,
+           currency, status, origin, confidence, evidence)
+        VALUES (${e.meal_id}, ${e.entry_id}, 'pantry_draw', ${lot.id},
+                ${amount.toFixed(2)}, ${Number(e.quantity_g).toFixed(3)}, ${lot.currency},
+                'proposed', 'auto', ${confidence.toFixed(3)},
+                ${sql.json({
+                  rule: "unit_lot_prorata/v1",
+                  lot_label: lot.label,
+                  lot_cost: remaining,
+                  window_start: lot.purchased_on,
+                  window_end: lot.window_end,
+                  window_closed_by: closedByRepurchase ? "repurchase" : "age cap",
+                  meals_in_window: entries.length,
+                  share_of_lot: Number(share.toFixed(4)),
+                  basis: "no printed weight — cost split pro-rata by grams eaten",
+                })})
+      `;
+      proposed++;
+    }
+  }
+
+  return { proposed, skipped };
+}
+
+/* ========================================================================== */
 
 export async function runMatcher(sinceDays = 60): Promise<MatchReport> {
   const lotsResolved = await resolveLotFoods();
   const direct = await proposeDirectLinks(sinceDays);
+  // Mass first: a printed weight is better evidence than an inferred window, so
+  // it gets first claim on any entry both could explain.
   const draws = await proposePantryDraws(sinceDays);
+  const unit = await proposeUnitLotAllocation(sinceDays);
 
   return {
     directProposed: direct.proposed,
     directConfirmed: direct.confirmed,
     lotsResolved,
-    drawsProposed: draws.proposed,
-    skippedNoCandidate: draws.skipped,
+    drawsProposed: draws.proposed + unit.proposed,
+    skippedNoCandidate: draws.skipped + unit.skipped,
   };
 }

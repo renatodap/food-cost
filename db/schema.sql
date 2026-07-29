@@ -427,8 +427,15 @@ SELECT
   CASE WHEN l.basis = 'mass' AND l.qty_total_g > 0
        THEN l.total_cost / l.qty_total_g
   END                                                          AS cost_per_g,
+  -- A mass lot is spent when its grams are gone; a unit lot has no gram figure
+  -- to deplete, so it is spent when its cost has been fully allocated. Without
+  -- the second branch a unit lot stays "open" forever and gets re-allocated on
+  -- every matcher run.
   (l.closed_at IS NULL
-   AND (l.basis <> 'mass' OR l.qty_total_g - COALESCE(d.drawn_g, 0) > 0.001)) AS is_open
+   AND CASE
+         WHEN l.basis = 'mass' THEN l.qty_total_g - COALESCE(d.drawn_g, 0) > 0.001
+         ELSE l.total_cost - COALESCE(d.drawn_cost, 0) > 0.005
+       END) AS is_open
 FROM pantry_lot l
 LEFT JOIN LATERAL (
   SELECT SUM(cl.allocated_g)      AS drawn_g,
