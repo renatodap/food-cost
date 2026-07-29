@@ -13,7 +13,16 @@ import {
 
 const PORT = Number(process.env.PORT || 3000);
 
+/**
+ * The externally-visible base URL, which every OAuth discovery document has to
+ * advertise. Normally derived from the forwarded headers, but PUBLIC_BASE_URL
+ * wins when set — behind a path-mounting proxy the container cannot see the
+ * prefix it is served under, so the URLs it advertises would point at the wrong
+ * place and the connector flow would dead-end on a 404.
+ */
 function issuerOf(req: IncomingMessage): string {
+  const override = process.env.PUBLIC_BASE_URL;
+  if (override) return override.replace(/\/$/, "");
   const host = (req.headers["x-forwarded-host"] as string) || req.headers.host || "localhost";
   const proto = (req.headers["x-forwarded-proto"] as string) || "https";
   return `${proto}://${host}`;

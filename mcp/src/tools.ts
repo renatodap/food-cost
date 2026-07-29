@@ -262,9 +262,13 @@ async function getCostSummary(a: Json) {
            ROUND(COALESCE(SUM(cost), 0), 2)              AS total_cost,
            ROUND(COALESCE(AVG(cost) FILTER (WHERE cost > 0), 0), 2) AS avg_cost_when_known,
            SUM(entry_count)                              AS food_items,
-           SUM(linked_entry_count)                       AS food_items_traced,
+           -- covered_entry_count, NOT linked_entry_count. A whole-meal charge
+           -- covers every entry of its meal while producing no per-entry links,
+           -- so summing the latter reports near-zero coverage for meals that
+           -- are fully attributed.
+           SUM(covered_entry_count)                      AS food_items_traced,
            CASE WHEN SUM(entry_count) = 0 THEN 0
-                ELSE ROUND(SUM(linked_entry_count)::numeric / SUM(entry_count), 3) END AS coverage
+                ELSE ROUND(SUM(covered_entry_count)::numeric / SUM(entry_count), 3) END AS coverage
     FROM v_meal_cost
     WHERE meal_date BETWEEN ${from}::date AND ${to}::date
     GROUP BY meal_type, meal_type_slug
@@ -274,7 +278,7 @@ async function getCostSummary(a: Json) {
     SELECT ROUND(COALESCE(SUM(cost), 0), 2) AS total_cost,
            COUNT(*) AS meals,
            SUM(entry_count) AS food_items,
-           SUM(linked_entry_count) AS food_items_traced
+           SUM(covered_entry_count) AS food_items_traced
     FROM v_meal_cost WHERE meal_date BETWEEN ${from}::date AND ${to}::date
   `;
   const items = Number(totals?.food_items ?? 0);
