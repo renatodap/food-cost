@@ -1,0 +1,23 @@
+{
+  "name": "food-cost-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Remote MCP connector for reconciling DAP Fitness meals against DAP Finance spending.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "postgres": "^3.4.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

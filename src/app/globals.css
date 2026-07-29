@@ -1,0 +1,213 @@
+@import "tailwindcss";
+
+/* ===========================================================================
+   food-cost design tokens
+   ---------------------------------------------------------------------------
+   Operate-mode surface: the tool disappears into the task. Restrained color is
+   the floor — hue is spent on DATA, never on decoration.
+
+   Two deliberate consequences:
+   1. The primary action is solid ink, not a colored button. Colour in this app
+      means "this is a meal type" or "this is a state"; a blue Save button would
+      make the reader parse blue two ways.
+   2. Monospace is used only for money, weights, dates and receipt lines — data
+      and measurement, the sanctioned use. Never as a costume for "technical".
+
+   The categorical ramp is NOT eyeballed. It is slots 1–4 of a validated
+   palette, re-checked against these exact surfaces:
+     light #FAF8F4 → all checks pass (contrast WARN on aqua/yellow → relief is
+                     shipped as direct labels + the meal-type table)
+     dark  #121110 → all checks pass
+   Re-run before changing any of these hexes:
+     node scripts/validate_palette.js "<hexes>" --mode light --surface "#FAF8F4"
+   =========================================================================== */
+
+@theme {
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SF Mono", monospace;
+
+  /* Fixed rem scale, ratio ≈1.15. Not fluid: users read this at a consistent
+     DPI, and a clamp()ed heading that shrinks inside a panel looks worse. */
+  --text-2xs: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.0625rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+  --text-4xl: 2.5rem;
+
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+}
+
+:root {
+  color-scheme: light;
+
+  /* Warm paper. Chosen from the use scene: a desk, daytime, reading numbers —
+     not a dark IDE. */
+  --bg: #faf8f4;
+  --surface: #ffffff;
+  --panel: #f3efe8; /* the second neutral layer: sidebar, toolbars, table heads */
+  --ink: #1a1815;
+  --ink-2: #55504a; /* secondary — tinted from the surface hue, never gray */
+  --ink-3: #857e75; /* muted */
+  --rule: #e4ded4;
+  --rule-strong: #cfc7ba;
+  --hover: #f0ece5;
+  --selected: #eae4d9;
+
+  /* Data — validated categorical slots. Order is the CVD-safety mechanism;
+     do not reorder without re-running the validator. */
+  --series-breakfast: #2a78d6;
+  --series-lunch: #eb6834;
+  --series-dinner: #1baf7a;
+  --series-snack: #eda100;
+
+  /* Absence of knowledge. Deliberately NOT a fifth categorical hue — it is not
+     a meal type, it is a hole, and it renders as neutral + hatch. */
+  --unattributed: #b9b1a4;
+
+  /* Status. Reserved: never reused as "series 5". Always ship with a label. */
+  --good: #1f7a4d;
+  --good-bg: #e6f2ea;
+  --warn: #8a6100;
+  --warn-bg: #f7efdb;
+  --bad: #a32f28;
+  --bad-bg: #f8e8e6;
+
+  --focus: #2a78d6;
+}
+
+/* Dark values are declared twice on purpose: the media query follows the OS
+   setting, the [data-theme] scope follows the in-app toggle, and the toggle must
+   win in BOTH directions — the :not() guard lets an explicit light stamp beat
+   OS-dark, and :where() keeps the media block's specificity below the toggle. */
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --bg: #121110;
+    --surface: #1a1918;
+    --panel: #221f1d;
+    --ink: #ece7e0;
+    --ink-2: #a89f94;
+    --ink-3: #7d7469;
+    --rule: #2c2926;
+    --rule-strong: #423d38;
+    --hover: #232120;
+    --selected: #2b2724;
+
+    /* Same four hues, re-stepped for the dark surface — not an automatic flip. */
+    --series-breakfast: #3987e5;
+    --series-lunch: #d95926;
+    --series-dinner: #199e70;
+    --series-snack: #c98500;
+
+    --unattributed: #4a443d;
+
+    --good: #4caf7d;
+    --good-bg: #16271f;
+    --warn: #d5a028;
+    --warn-bg: #2a2314;
+    --bad: #e08079;
+    --bad-bg: #2d1a18;
+
+    --focus: #5598e7;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121110;
+  --surface: #1a1918;
+  --panel: #221f1d;
+  --ink: #ece7e0;
+  --ink-2: #a89f94;
+  --ink-3: #7d7469;
+  --rule: #2c2926;
+  --rule-strong: #423d38;
+  --hover: #232120;
+  --selected: #2b2724;
+
+  --series-breakfast: #3987e5;
+  --series-lunch: #d95926;
+  --series-dinner: #199e70;
+  --series-snack: #c98500;
+
+  --unattributed: #4a443d;
+
+  --good: #4caf7d;
+  --good-bg: #16271f;
+  --warn: #d5a028;
+  --warn-bg: #2a2314;
+  --bad: #e08079;
+  --bad-bg: #2d1a18;
+
+  --focus: #5598e7;
+}
+
+* {
+  border-color: var(--rule);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Money, weights, counts, dates. Tabular figures so columns of numbers line up
+   digit-for-digit — the entire reason a ledger is readable at a glance. */
+.tnum {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.01em;
+}
+
+/* Headings get tighter tracking as they grow; the floor is -0.04em. */
+h1, h2, h3 {
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::selection {
+  background: var(--selected);
+}
+
+/* The hatch that means "we don't know". Used for the unattributed band on the
+   daily chart and for any lot balance we can't account for. A texture rather
+   than a colour so it survives greyscale printing and forced-colors mode. */
+.hatch {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--unattributed) 0 1.5px,
+    transparent 1.5px 5px
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
