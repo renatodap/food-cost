@@ -60,7 +60,9 @@ export async function getMealTypeSummary(since: string, until: string): Promise<
            COUNT(*)                                   AS meals,
            COALESCE(SUM(cost), 0)                     AS total,
            SUM(entry_count)                           AS entries,
-           SUM(linked_entry_count)                    AS linked_entries,
+           -- covered_entry_count, not linked_entry_count: a whole-meal charge
+           -- covers every entry while producing no per-entry links.
+           SUM(covered_entry_count)                   AS linked_entries,
            -- Averaged over meals WITH a cost, not all meals: dividing known
            -- spend by every meal including the unattributed ones would report an
            -- average dinner far cheaper than any dinner actually was.
@@ -102,7 +104,7 @@ export async function getPeriodTotals(since: string, until: string): Promise<Per
            COALESCE(SUM(cost_proposed), 0) AS proposed,
            COUNT(*)                        AS meals,
            COALESCE(SUM(entry_count), 0)   AS entries,
-           COALESCE(SUM(linked_entry_count), 0) AS linked_entries
+           COALESCE(SUM(covered_entry_count), 0) AS linked_entries
     FROM v_meal_cost
     WHERE meal_date BETWEEN ${since}::date AND ${until}::date
   `;

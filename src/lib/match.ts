@@ -26,6 +26,22 @@ import { sql } from "@/db/client";
 export const AUTO_CONFIRM = 0.9;
 export const PROPOSE_FLOOR = 0.45;
 
+/**
+ * How similar a receipt line must be to a food before it is resolved to it.
+ *
+ * The candidate set is only foods that have actually been eaten, which is a
+ * strong prior — "Kroger Carrots" is being matched against a few hundred foods
+ * he eats, not 406k. That makes a lower bar safe than it would be against the
+ * full library, and the difference matters: at 0.5 most store-brand lines
+ * ("Smithfield Pork Loin" vs "Pork loin, raw") never resolve, and a lot that
+ * resolves to nothing can never be drawn from.
+ *
+ * A wrong resolution is still worse than none, so this stays above the trigram
+ * default of 0.3 and every resulting link goes to the review queue rather than
+ * being auto-confirmed.
+ */
+export const LOT_RESOLVE_MIN = 0.4;
+
 /** Beyond this, "I bought it then, I ate it now" stops being credible. */
 export const MAX_PANTRY_AGE_DAYS = 90;
 /** Past this, still plausible but discounted — most fresh food is gone by now. */
@@ -90,7 +106,7 @@ export async function resolveLotFoods(): Promise<number> {
     picked AS (
       SELECT * FROM by_alias
       UNION ALL
-      SELECT * FROM by_trigram WHERE score >= 0.5
+      SELECT * FROM by_trigram WHERE score >= ${LOT_RESOLVE_MIN}
     )
     UPDATE pantry_lot l
        SET food_id = p.food_id

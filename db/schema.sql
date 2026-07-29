@@ -503,13 +503,22 @@ SELECT
   CASE WHEN d.amount IS NOT NULL THEN 'direct'
        WHEN pe.amount IS NOT NULL THEN 'itemized'
        ELSE 'unattributed' END                    AS attribution,
-  -- A direct whole-meal charge covers the meal completely by definition.
+  -- A whole-meal charge covers the meal completely by definition.
   CASE
     WHEN d.amount IS NOT NULL THEN 1.0
     WHEN COALESCE(e.n, 0) = 0  THEN 0.0
     ELSE ROUND(COALESCE(pe.linked_entries, 0)::numeric / e.n, 3)
   END                                             AS coverage,
-  COALESCE(pe.linked_entries, 0)                  AS linked_entry_count
+  COALESCE(pe.linked_entries, 0)                  AS linked_entry_count,
+  -- How many entries this meal's cost actually accounts for, which is NOT the
+  -- same as how many have their own link. A whole-meal charge covers every
+  -- entry while producing zero per-entry links, so summing linked_entry_count
+  -- across meals reports 0% coverage for a month that is fully attributed.
+  -- Aggregate coverage must use THIS column.
+  CASE
+    WHEN d.amount IS NOT NULL THEN COALESCE(e.n, 0)
+    ELSE COALESCE(pe.linked_entries, 0)
+  END                                             AS covered_entry_count
 FROM mirror_meal m
 LEFT JOIN entries    e  ON e.meal_id  = m.id
 LEFT JOIN whole_meal d  ON d.meal_id  = m.id
@@ -529,9 +538,9 @@ SELECT
   SUM(cost)::numeric(14,2)                       AS cost,
   SUM(cost_proposed)::numeric(14,2)              AS cost_proposed,
   SUM(entry_count)                               AS entries,
-  SUM(linked_entry_count)                        AS linked_entries,
+  SUM(covered_entry_count)                       AS linked_entries,
   CASE WHEN SUM(entry_count) = 0 THEN 0
-       ELSE ROUND(SUM(linked_entry_count)::numeric / SUM(entry_count), 3)
+       ELSE ROUND(SUM(covered_entry_count)::numeric / SUM(entry_count), 3)
   END                                            AS coverage
 FROM v_meal_cost
 GROUP BY meal_date, meal_type, meal_type_slug;
