@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
-import { Nav } from "@/components/Nav";
 import "./globals.css";
 
 const sans = IBM_Plex_Sans({
@@ -22,6 +21,11 @@ export const metadata: Metadata = {
   description: "What every meal actually cost — meals reconciled against the money that paid for them.",
 };
 
+/**
+ * Root layout holds only the document, fonts and theme bootstrap. The nav lives
+ * in the (app) group's layout so the login screen — which is reachable without a
+ * session — doesn't render a nav you can't use yet.
+ */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
@@ -35,12 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
       </head>
-      <body className={`${sans.variable} ${mono.variable}`}>
-        <div className="flex min-h-screen">
-          <Nav />
-          <main className="min-w-0 flex-1">{children}</main>
-        </div>
-      </body>
+      <body className={`${sans.variable} ${mono.variable}`}>{children}</body>
     </html>
   );
 }
